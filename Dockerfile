@@ -6,6 +6,8 @@ RUN python -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirements
 
 # --- runtime stage: small image, non-root user ---
 FROM python:3.12-slim
+LABEL org.opencontainers.image.source="https://github.com/ahmed-elgamil-devops/it-ops-monitor"
+LABEL org.opencontainers.image.description="IT Ops Monitor status page"
 RUN useradd --create-home --uid 10001 appuser
 WORKDIR /srv
 COPY --from=build /venv /venv
