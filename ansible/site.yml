@@ -1,0 +1,90 @@
+---
+# Prepare the Ubuntu server and deploy the monitoring stack.
+# Usage: ansible-playbook -i inventory.ini site.yml
+- name: Set up IT Ops Monitor server
+  hosts: monitor
+  become: true
+  vars:
+    app_dir: /opt/it-ops-monitor
+    admin_user: itadmin
+
+  tasks:
+    - name: Update apt cache and install base packages
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, ufw, fail2ban, unattended-upgrades]
+        update_cache: true
+        state: present
+
+    - name: Create the admin user
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
+
+    - name: Disable SSH password login and root login
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        validate: /usr/sbin/sshd -t -f %s
+      loop:
+        - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication no" }
+        - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
+      notify: Restart ssh
+
+    - name: Firewall - allow SSH, status page and Grafana only
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: ["22", "8000", "3000"]
+
+    - name: Firewall - deny everything else and enable
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+    - name: Install Docker and the Compose plugin
+      ansible.builtin.apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+
+    - name: Let the admin user run Docker
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        groups: docker
+        append: true
+
+    - name: Copy project files to the server
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ app_dir }}/"
+        mode: "0644"
+      loop: [docker-compose.yml, app, monitoring, Dockerfile]
+
+    - name: Start the stack
+      ansible.builtin.command:
+        cmd: docker compose up -d --build
+        chdir: "{{ app_dir }}"
+      register: compose
+      changed_when: "'Started' in compose.stderr or 'Created' in compose.stderr"
+
+    - name: Install the nightly backup job
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/backup.sh"
+        dest: /usr/local/bin/it-ops-backup.sh
+        mode: "0755"
+
+    - name: Run the backup every night at 02:00
+      ansible.builtin.cron:
+        name: it-ops-monitor backup
+        hour: "2"
+        minute: "0"
+        job: /usr/local/bin/it-ops-backup.sh >> /var/log/it-ops-backup.log 2>&1
+
+  handlers:
+    - name: Restart ssh
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
