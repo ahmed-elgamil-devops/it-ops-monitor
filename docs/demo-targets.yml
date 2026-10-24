@@ -1,0 +1,7 @@
+# Local demo targets used for the screenshot in the README.
+targets:
+  - {name: Company intranet, group: Internal, type: http, url: "http://127.0.0.1:9001"}
+  - {name: File server, group: Internal, type: tcp, host: 127.0.0.1, port: 9001}
+  - {name: Status page health, group: Monitoring, type: http, url: "http://127.0.0.1:8000/healthz"}
+  - {name: Office printer panel, group: Office, type: tcp, host: 127.0.0.1, port: 9631}
+  - {name: Internal DNS, group: Network, type: dns, host: localhost}
