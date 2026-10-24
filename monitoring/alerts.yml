@@ -1,0 +1,30 @@
+groups:
+  - name: it-ops
+    rules:
+      - alert: ServiceDown
+        expr: target_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.name }} is down"
+
+      - alert: SlowService
+        expr: target_response_seconds > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.name }} is slow ({{ $value }}s)"
+
+      - alert: DiskAlmostFull
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Less than 15% disk space left on the server"
+
+      - alert: HighCPU
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU above 85% for 10 minutes"
