@@ -1,0 +1,34 @@
+# Services the IT team wants to watch. Edit this file - no code changes needed.
+# type: http (status code < max_status), tcp (port is open), dns (name resolves)
+targets:
+  - name: Company website
+    group: Public
+    type: http
+    url: https://example.com
+
+  - name: Microsoft 365 login
+    group: SaaS
+    type: http
+    url: https://login.microsoftonline.com
+
+  - name: Google DNS
+    group: Network
+    type: tcp
+    host: 8.8.8.8
+    port: 53
+
+  - name: Mail server (SMTP)
+    group: Network
+    type: tcp
+    host: smtp.gmail.com
+    port: 587
+
+  - name: Internal DNS - company domain
+    group: Network
+    type: dns
+    host: example.com
+
+  - name: Grafana (local)
+    group: Monitoring
+    type: http
+    url: http://grafana:3000/api/health
