@@ -1,98 +1,70 @@
-# IT Ops Monitor
+# NOC Monitoring Lab (Zabbix + Hyper-V)
 
-A small, practical toolkit for an IT team: a **status page** that watches the services a company depends on
-(website, Microsoft 365, mail, DNS, file server, printers), **Prometheus + Grafana** monitoring with alerts,
-and the everyday **sysadmin scripts** for backups, user onboarding and Windows PC health checks.
+A small Network Operations Center: Zabbix monitors Windows and Linux servers and a
+network device, raises alerts by severity, and every alert has a runbook and a
+shift-handover record. The servers run as Hyper-V virtual machines.
 
-It runs on one cloud server — on **AWS or Azure**, your choice — that is **created with Terraform**, **configured with Ansible**, runs everything
-in **Docker Compose**, and is tested and scanned on every push with **GitHub Actions + Trivy**.
+## What it covers
 
-![status page](docs/status-page.png)
+| Skill asked for in NOC / IT jobs | Where it is in this lab |
+| --- | --- |
+| Network and server monitoring | Zabbix server, agents and SNMP |
+| Virtualization | Hyper-V VMs, checkpoints, virtual switches |
+| Alerting and severity | Triggers for host down, high CPU, low disk, service stopped |
+| Incident handling | Runbooks in `runbooks/` |
+| Shift handover and reporting | `reports/shift-handover-template.md`, weekly availability report |
 
-## Why I built it
+## Lab layout
 
-In my IT support job the first question on every ticket was *"is it just me, or is it down for everyone?"*.
-This project answers that question automatically, and brings together everything I have practised:
-Linux administration, networking checks, scripting, infrastructure as code, configuration management,
-containers, CI/CD and monitoring.
+| VM / container | Role | IP (Internal virtual switch) |
+| --- | --- | --- |
+| `zabbix` (Docker on the host) | Zabbix server, web UI, PostgreSQL | host |
+| `DC01` (Hyper-V) | Windows Server 2022, AD DS, DNS, DHCP | 192.168.50.10 |
+| `PC01` (Hyper-V) | Windows 10/11 client | DHCP |
+| `LNX01` (Hyper-V) | Ubuntu Server with Nginx and SNMP | 192.168.50.20 |
 
-## Architecture
+## Steps
 
-```
-GitHub push ──► GitHub Actions: ruff + pytest │ terraform validate │ ansible-lint │ shellcheck
-                        │
-                        └─► docker build ─► Trivy scan ─► push image to GHCR
+### 1. Hyper-V
+1. Turn on Hyper-V (Windows Features), create an **Internal** virtual switch `LabNet`.
+2. Create the three VMs from evaluation ISOs, connect them to `LabNet`, set the IPs above.
+3. Take a **checkpoint** of each VM before changes (and document how you restored one).
 
-Terraform ──► AWS EC2 (me-central-1)  or  Azure VM (UAE North)
-              Ubuntu 24.04, firewall (Security Group / NSG) open only to the admin IP
-                        │
-Ansible   ──► harden server (no root/password SSH, UFW, fail2ban, auto updates)
-              install Docker ─► docker compose up ─► nightly backup cron
-                        │
-          ┌─────────────┴────────────────────────────────────────┐
-          │  status app (FastAPI)  ──/metrics──► Prometheus ──► Grafana
-          │  node-exporter (CPU / RAM / disk) ──►   + alert rules       │
-          └──────────────────────────────────────────────────────┘
-```
-
-## What's inside
-
-| Folder | What it does | Skills |
-|---|---|---|
-| `app/` | FastAPI status page. Checks every target in `targets.yml` (HTTP status, TCP port, DNS lookup) every 30s, shows UP/DOWN, exposes Prometheus metrics | Python, networking, HTTP/TCP/DNS |
-| `monitoring/` | Prometheus scrape config + alerts: service down, slow service, disk < 15%, CPU > 85% | Prometheus, Grafana, alerting |
-| `docker-compose.yml` | App + Prometheus + Grafana + node-exporter | Docker, Docker Compose |
-| `Dockerfile` | Multi-stage build, runs as non-root, built-in health check | Container security |
-| `terraform/aws/` | EC2 in the UAE region, security group locked to the admin IP, encrypted disk, IMDSv2 | Terraform, AWS (EC2, SG, key pair) |
-| `terraform/azure/` | The same server on Azure: resource group, VNet + subnet, NSG locked to the admin IP, public IP, Ubuntu VM with SSH key only | Terraform, Azure (VM, VNet, NSG) |
-| `ansible/` | Admin user, SSH hardening, UFW firewall, fail2ban, Docker, deploy, backup cron | Ansible, Linux hardening |
-| `scripts/backup.sh` | Nightly backup of config + Grafana data, keeps 7 copies, optional off-site copy to AWS S3 or Azure Blob Storage | Bash, backups (3-2-1) |
-| `scripts/onboard-users.sh` | Creates Linux accounts for new staff from a CSV, temp password, forced change at first login | User & access management |
-| `scripts/Get-PCHealthReport.ps1` | Windows PC report: CPU, RAM, disk space, uptime, last update, key services → HTML | PowerShell, help desk |
-| `.github/workflows/ci.yml` | Lint + tests, Terraform/Ansible/ShellCheck checks, image build, Trivy scan, push to GHCR | CI/CD, DevSecOps |
-
-## Run it locally (2 minutes)
-
+### 2. Zabbix
 ```bash
-docker compose up -d --build
-# status page → http://localhost:8000
-# Grafana     → http://localhost:3000  (admin / change-me)
-# Prometheus  → http://localhost:9090/alerts
+cd zabbix
+docker compose up -d
 ```
+Open http://localhost:8081 and log in with the default Zabbix admin account shown in the
+Zabbix documentation, then change the password right away.
 
-Add or remove services by editing `app/targets.yml` — no code changes and no rebuild needed.
+### 3. Add hosts
+- **DC01 and PC01:** install the Zabbix agent 2 (MSI), point it to the host IP, link the
+  template *Windows by Zabbix agent*.
+- **LNX01:** `sudo apt install zabbix-agent2 snmpd nginx`, link *Linux by Zabbix agent* and
+  *Nginx by HTTP*.
+- **Network device:** add LNX01 a second time over **SNMP v2** (community `labro`), link
+  *Linux by SNMP*, to practise SNMP the way switches and firewalls are monitored.
 
-## Deploy to the cloud (AWS or Azure)
+### 4. Triggers and alerts
+Use the template triggers plus these, and set the severity:
 
-```bash
-# pick one: aws (needs `aws configure`) or azure (needs `az login`)
-CLOUD=aws
+| Alert | Severity |
+| --- | --- |
+| Host unreachable for 3 minutes | High |
+| Disk free below 15% | Warning |
+| CPU above 90% for 10 minutes | Average |
+| Windows service `Spooler` or `DNS` stopped | High |
+| Nginx down | Disaster |
 
-cd terraform/$CLOUD
-terraform init
-terraform apply -var="admin_cidr=$(curl -s ifconfig.me)/32"
+Add an e-mail media type (or a Telegram bot) so alerts are sent out.
 
-cd ../../ansible
-cp inventory.ini.example inventory.ini   # put the public_ip from terraform output
-ansible-galaxy collection install community.general
-ansible-playbook -i inventory.ini site.yml
+### 5. Break things on purpose and handle them
+Stop the VM, fill the disk, stop the DNS service, stop Nginx. For each one:
+watch the alert fire, follow the runbook in `runbooks/`, record it in the shift handover.
 
-# when finished, avoid charges:
-cd ../terraform/$CLOUD && terraform destroy
-```
+### 6. Dashboard and report
+Build a dashboard (problems by severity, host availability, top CPU) and export the
+weekly availability report from *Reports > Availability report*.
 
-The Ansible playbook is the same for both clouds — it only needs an Ubuntu server and SSH.
-
-## Tests
-
-```bash
-pip install -r app/requirements.txt pytest ruff
-ruff check app tests && pytest -q
-```
-
-The tests check the health endpoint, validate `targets.yml`, confirm that a closed port is reported as DOWN,
-and that the status page and Prometheus metrics show it.
-
-## Author
-
-Ahmed Elgamil — DevOps & Cloud Engineer | IT Support · [LinkedIn](https://www.linkedin.com/in/ahmed-elgamil-devops) · [GitHub](https://github.com/ahmed-elgamil-devops)
+Put screenshots of each step in `screenshots/`.
